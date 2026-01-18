@@ -94,6 +94,32 @@ execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
   });
 });
 
+app.delete("/undeploy/:appName", (req, res) => {
+  const { appName } = req.params;
+
+  const appPath = path.join(APPS_DIR, appName);
+
+  try {
+    execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
+    execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
+
+    // Remove nginx route
+    const config = fs.readFileSync(NGINX_CONFIG, "utf8");
+    const updated = config.replace(
+      new RegExp(`\\s*location /${appName}/[\\s\\S]*?}\\n`, "g"),
+      ""
+    );
+
+    fs.writeFileSync(NGINX_CONFIG, updated);
+    execSync("sudo nginx -t && sudo systemctl reload nginx");
+
+    res.json({ message: `${appName} undeployed successfully` });
+  } catch (err) {
+    res.status(500).json({ error: "Undeploy failed" });
+  }
+});
+
+
 app.listen(5000, () => {
   console.log("PaaS backend running on port 5000");
 });
