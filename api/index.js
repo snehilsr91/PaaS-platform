@@ -12,6 +12,10 @@ app.get("/", (req, res) => {
   res.send("College PaaS backend running 🚀");
 });
 
+function isValidAppName(name) {
+  return /^[a-zA-Z0-9-_]+$/.test(name);
+}
+
 function addNginxRoute(appName, port) {
   const block = `
     location /${appName}/ {
@@ -53,6 +57,11 @@ app.post("/deploy", (req, res) => {
   if (!repoUrl || !appName) {
     return res.status(400).json({ error: "repoUrl and appName required" });
   }
+
+if (!isValidAppName(appName)) {
+  return res.status(400).json({ error: "Invalid app name" });
+}
+
 
   const appPath = path.join(APPS_DIR, appName);
   // Clean previous state (idempotent deploy)
@@ -96,6 +105,11 @@ execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
 
 app.delete("/undeploy/:appName", (req, res) => {
   const { appName } = req.params;
+
+if (!isValidAppName(appName)) {
+  return res.status(400).json({ error: "Invalid app name" });
+}
+
 
   const appPath = path.join(APPS_DIR, appName);
 
