@@ -2,7 +2,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Rocket, Loader2, CheckCircle2, XCircle, ExternalLink, Trash2 } from "lucide-react";
+import {
+  Rocket,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  Trash2,
+} from "lucide-react";
 
 type DeployStatus = "idle" | "loading" | "success" | "error";
 
@@ -20,14 +27,14 @@ export function DeployForm() {
 
   const handleDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!repoUrl || !appName) return;
 
     setStatus("loading");
     setResult(null);
 
     try {
-      const response = await fetch("/deploy", {
+      const response = await fetch("/api/deploy", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -57,7 +64,7 @@ export function DeployForm() {
     setResult(null);
 
     try {
-      const response = await fetch(`/undeploy/${appName}`, {
+      const response = await fetch(`/api/undeploy/${appName}`, {
         method: "DELETE",
       });
 
@@ -94,7 +101,9 @@ export function DeployForm() {
           </div>
           <div>
             <h2 className="text-xl font-bold">Deploy Application</h2>
-            <p className="text-sm text-muted-foreground">Enter your repo URL and app name</p>
+            <p className="text-sm text-muted-foreground">
+              Enter your repo URL and app name
+            </p>
           </div>
         </div>
 
@@ -123,7 +132,11 @@ export function DeployForm() {
               type="text"
               placeholder="my-awesome-app"
               value={appName}
-              onChange={(e) => setAppName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              onChange={(e) =>
+                setAppName(
+                  e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+                )
+              }
               disabled={status === "loading" || status === "success"}
               className="bg-input border-border/50 focus:border-primary h-12 font-mono"
             />
@@ -187,7 +200,9 @@ export function DeployForm() {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-success mb-1">Deployed Successfully!</p>
+                    <p className="font-medium text-success mb-1">
+                      Deployed Successfully!
+                    </p>
                     <a
                       href={result.url}
                       target="_blank"
@@ -207,8 +222,12 @@ export function DeployForm() {
                 <div className="flex items-start gap-3">
                   <XCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-destructive mb-1">Deployment Failed</p>
-                    <p className="text-sm text-muted-foreground">{result.error}</p>
+                    <p className="font-medium text-destructive mb-1">
+                      Deployment Failed
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {result.error}
+                    </p>
                   </div>
                 </div>
               </div>
