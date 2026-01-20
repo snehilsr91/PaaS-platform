@@ -65,7 +65,7 @@ location /${appName}/ {
 /**
  * DEPLOY
  */
-app.post("/deploy", (req, res) => {
+app.post("/api/deploy", (req, res) => {
   const { repoUrl, appName } = req.body;
 
   if (!repoUrl || !appName) {
@@ -130,7 +130,7 @@ app.post("/deploy", (req, res) => {
 /**
  * UNDEPLOY
  */
-app.delete("/undeploy/:appName", (req, res) => {
+app.delete("/api/undeploy/:appName", (req, res) => {
   const { appName } = req.params;
 
   if (!isValidAppName(appName)) {
