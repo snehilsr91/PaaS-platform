@@ -45,28 +45,53 @@ function getFreePort(start = 3001) {
       execSync(`ss -tuln | grep :${port}`, { stdio: "ignore" });
       port++; // port in use
     } catch {
-      return port; // free port
+      return port;
     }
   }
 }
 
+/**
+ * NGINX ROUTING (CORRECT WAY)
+ */
+function addNginxRoute(appName, port) {
+  if (!fs.existsSync(NGINX_APPS_DIR)) {
+    fs.mkdirSync(NGINX_APPS_DIR, { recursive: true });
+  }
 
-app.post("/deploy", (req, res) => {
+  const confPath = path.join(NGINX_APPS_DIR, `${appName}.conf`);
+
+  const config = `
+location /${appName}/ {
+    proxy_pass http://localhost:${port};
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+`;
+
+  fs.writeFileSync(confPath, config);
+}
+
+/**
+ * DEPLOY
+ */
+app.post("/api/deploy", (req, res) => {
   const { repoUrl, appName } = req.body;
 
   if (!repoUrl || !appName) {
     return res.status(400).json({ error: "repoUrl and appName required" });
   }
 
-if (!isValidAppName(appName)) {
-  return res.status(400).json({ error: "Invalid app name" });
-}
-
+  if (!isValidAppName(appName)) {
+    return res.status(400).json({ error: "Invalid app name" });
+  }
 
   const appPath = path.join(APPS_DIR, appName);
   // Clean previous state (idempotent deploy)
-execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
-execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
+  execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
+  execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
 
   const imageName = `paas-${appName}`;
   const port = getFreePort();
@@ -80,7 +105,7 @@ execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
       if (err) return res.status(500).json({ error: "Docker build failed" });
 
       exec(
-  `docker rm -f ${appName} || true && docker run -d -p ${port}:3000 --name ${appName} ${imageName}`,
+        `docker rm -f ${appName} || true && docker run -d -p ${port}:3000 --name ${appName} ${imageName}`,
         (err) => {
           if (err) return res.status(500).json({ error: "Docker run failed" });
 
@@ -88,28 +113,28 @@ execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
 
           exec(`sudo nginx -t && sudo systemctl reload nginx`, (err) => {
             if (err)
-              return res
-                .status(500)
-                .json({ error: "NGINX reload failed" });
+              return res.status(500).json({ error: "NGINX reload failed" });
 
             res.json({
               message: "App deployed successfully",
               url: `http://3.108.249.105/${appName}`,
             });
           });
-        }
+        },
       );
     });
   });
 });
 
-app.delete("/undeploy/:appName", (req, res) => {
+/**
+ * UNDEPLOY
+ */
+app.delete("/api/undeploy/:appName", (req, res) => {
   const { appName } = req.params;
 
-if (!isValidAppName(appName)) {
-  return res.status(400).json({ error: "Invalid app name" });
-}
-
+  if (!isValidAppName(appName)) {
+    return res.status(400).json({ error: "Invalid app name" });
+  }
 
   const appPath = path.join(APPS_DIR, appName);
 
@@ -121,7 +146,7 @@ if (!isValidAppName(appName)) {
     const config = fs.readFileSync(NGINX_CONFIG, "utf8");
     const updated = config.replace(
       new RegExp(`\\s*location /${appName}/[\\s\\S]*?}\\n`, "g"),
-      ""
+      "",
     );
 
     fs.writeFileSync(NGINX_CONFIG, updated);
@@ -132,7 +157,6 @@ if (!isValidAppName(appName)) {
     res.status(500).json({ error: "Undeploy failed" });
   }
 });
-
 
 app.listen(5000, () => {
   console.log("PaaS backend running on port 5000");
