@@ -2,55 +2,69 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { exec, execSync } = require("child_process");
+
 const app = express();
 app.use(express.json());
 
+/**
+ * CONSTANTS
+ */
 const APPS_DIR = "/home/ubuntu/paas-platform/apps";
-const NGINX_CONFIG = "/etc/nginx/sites-available/paas";
+const NGINX_APPS_DIR = "/etc/nginx/conf.d/apps";
 
+/**
+ * HEALTH CHECK
+ */
 app.get("/", (req, res) => {
   res.send("College PaaS backend running 🚀");
 });
 
+/**
+ * UTILS
+ */
 function isValidAppName(name) {
-  return /^[a-zA-Z0-9-_]+$/.test(name);
-}
-
-function addNginxRoute(appName, port) {
-  const block = `
-    location /${appName}/ {
-        proxy_pass http://localhost:${port}/;
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-  `;
-
-  try {
-    fs.appendFileSync(NGINX_CONFIG, block);
-  } catch (err) {
-    console.error("Failed to write NGINX config:", err.message);
-    throw err;
-  }
+  return /^[a-z0-9-]+$/.test(name);
 }
 
 function getFreePort(start = 3001) {
-  const { execSync } = require("child_process");
   let port = start;
-
   while (true) {
     try {
       execSync(`ss -tuln | grep :${port}`, { stdio: "ignore" });
-      port++; // port in use
+      port++;
     } catch {
-      return port; // free port
+      return port;
     }
   }
 }
 
+/**
+ * NGINX ROUTING (CORRECT WAY)
+ */
+function addNginxRoute(appName, port) {
+  if (!fs.existsSync(NGINX_APPS_DIR)) {
+    fs.mkdirSync(NGINX_APPS_DIR, { recursive: true });
+  }
 
+  const confPath = path.join(NGINX_APPS_DIR, `${appName}.conf`);
+
+  const config = `
+location /${appName}/ {
+    proxy_pass http://localhost:${port};
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+`;
+
+  fs.writeFileSync(confPath, config);
+}
+
+/**
+ * DEPLOY
+ */
 app.post("/deploy", (req, res) => {
   const { repoUrl, appName } = req.body;
 
@@ -58,82 +72,96 @@ app.post("/deploy", (req, res) => {
     return res.status(400).json({ error: "repoUrl and appName required" });
   }
 
-if (!isValidAppName(appName)) {
-  return res.status(400).json({ error: "Invalid app name" });
-}
-
+  if (!isValidAppName(appName)) {
+    return res.status(400).json({ error: "Invalid app name" });
+  }
 
   const appPath = path.join(APPS_DIR, appName);
-  // Clean previous state (idempotent deploy)
-execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
-execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
-
   const imageName = `paas-${appName}`;
   const port = getFreePort();
 
-  if (!fs.existsSync(APPS_DIR)) fs.mkdirSync(APPS_DIR);
+  try {
+    // Clean previous state (idempotent deploy)
+    execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
+    execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
+
+    if (!fs.existsSync(APPS_DIR)) {
+      fs.mkdirSync(APPS_DIR, { recursive: true });
+    }
+  } catch {}
 
   exec(`git clone ${repoUrl} ${appPath}`, (err) => {
-    if (err) return res.status(500).json({ error: "Git clone failed" });
+    if (err) {
+      return res.status(500).json({ error: "Git clone failed" });
+    }
 
     exec(`docker build -t ${imageName} ${appPath}`, (err) => {
-      if (err) return res.status(500).json({ error: "Docker build failed" });
+      if (err) {
+        return res.status(500).json({ error: "Docker build failed" });
+      }
 
       exec(
-  `docker rm -f ${appName} || true && docker run -d -p ${port}:3000 --name ${appName} ${imageName}`,
+        `docker run -d -p ${port}:3000 --name ${appName} ${imageName}`,
         (err) => {
-          if (err) return res.status(500).json({ error: "Docker run failed" });
+          if (err) {
+            return res.status(500).json({ error: "Docker run failed" });
+          }
 
-          addNginxRoute(appName, port);
+          try {
+            addNginxRoute(appName, port);
 
-          exec(`sudo nginx -t && sudo systemctl reload nginx`, (err) => {
-            if (err)
-              return res
-                .status(500)
-                .json({ error: "NGINX reload failed" });
+            execSync("sudo nginx -t", { stdio: "inherit" });
+            execSync("sudo systemctl reload nginx", { stdio: "inherit" });
 
-            res.json({
+            return res.json({
               message: "App deployed successfully",
               url: `http://3.108.249.105/${appName}`,
             });
-          });
+          } catch (e) {
+            console.error("NGINX reload error:", e.message);
+            return res.status(500).json({ error: "NGINX reload failed" });
+          }
         }
       );
     });
   });
 });
 
+/**
+ * UNDEPLOY
+ */
 app.delete("/undeploy/:appName", (req, res) => {
   const { appName } = req.params;
 
-if (!isValidAppName(appName)) {
-  return res.status(400).json({ error: "Invalid app name" });
-}
-
+  if (!isValidAppName(appName)) {
+    return res.status(400).json({ error: "Invalid app name" });
+  }
 
   const appPath = path.join(APPS_DIR, appName);
+  const confPath = path.join(NGINX_APPS_DIR, `${appName}.conf`);
 
   try {
     execSync(`docker rm -f ${appName}`, { stdio: "ignore" });
     execSync(`rm -rf ${appPath}`, { stdio: "ignore" });
 
-    // Remove nginx route
-    const config = fs.readFileSync(NGINX_CONFIG, "utf8");
-    const updated = config.replace(
-      new RegExp(`\\s*location /${appName}/[\\s\\S]*?}\\n`, "g"),
-      ""
-    );
+    if (fs.existsSync(confPath)) {
+      fs.unlinkSync(confPath);
+    }
 
-    fs.writeFileSync(NGINX_CONFIG, updated);
-    execSync("sudo nginx -t && sudo systemctl reload nginx");
+    execSync("sudo nginx -t", { stdio: "inherit" });
+    execSync("sudo systemctl reload nginx", { stdio: "inherit" });
 
-    res.json({ message: `${appName} undeployed successfully` });
+    return res.json({ message: `${appName} undeployed successfully` });
   } catch (err) {
-    res.status(500).json({ error: "Undeploy failed" });
+    console.error("Undeploy error:", err.message);
+    return res.status(500).json({ error: "Undeploy failed" });
   }
 });
 
-
+/**
+ * START SERVER
+ */
 app.listen(5000, () => {
   console.log("PaaS backend running on port 5000");
 });
+
